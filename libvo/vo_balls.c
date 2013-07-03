@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <X11/extensions/XInput2.h>
 
 #include "config.h"
 #include "mp_msg.h"
@@ -120,6 +121,7 @@ struct colour {
   float b;
 } slope, offset, power;
 
+int xi_opcode;
 
 /* The squares that are tiled to make up the game screen polygon */
 
@@ -581,6 +583,21 @@ static int config_glx(uint32_t width, uint32_t height, uint32_t d_width, uint32_
 
   vo_x11_create_vo_window(vinfo, vo_dx, vo_dy, d_width, d_height,
           flags, vo_x11_create_colormap(vinfo), "balls", title);
+
+  // Find X Input Extension opcode
+  int event, error;
+  XQueryExtension(mDisplay, "XInputExtension", &xi_opcode, &event, &error);
+    
+  // Ask for Raw X Input Extension events
+  XIEventMask mask;
+  mask.mask_len = XIMaskLen(XI_RawMotion);
+  mask.mask = calloc(mask.mask_len, sizeof(char));
+  mask.deviceid = XIAllMasterDevices;
+  XISetMask(mask.mask, XI_RawButtonPress);
+  XISetMask(mask.mask, XI_RawButtonRelease);
+  XISetMask(mask.mask, XI_RawMotion);
+  XISelectEvents(mDisplay, DefaultRootWindow(mDisplay), &mask, 1);
+  free(mask.mask);
 
   return 0;
 }

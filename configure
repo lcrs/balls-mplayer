@@ -5096,7 +5096,7 @@ EOF
     if cc_check $ld_tmp ; then
       _gl=yes
       _gl_x11=yes
-      libs_mplayer="$libs_mplayer $ld_tmp $ld_dl"
+      libs_mplayer="$libs_mplayer $ld_tmp $ld_dl -lXi"
       break
     fi
   done
