@@ -136,8 +136,10 @@ extern const vo_functions_t video_out_quartz;
 extern const vo_functions_t video_out_pnm;
 extern const vo_functions_t video_out_md5sum;
 extern const vo_functions_t video_out_mng;
+extern const vo_functions_t video_out_balls;
 
-/* The following declarations are _not_ const because functions pointers
+/* The following declarations are _not_ co
+nst because functions pointers
  * get overloaded during (re)initialization. */
 extern vo_functions_t video_out_cvidix;
 extern vo_functions_t video_out_fbdev;
@@ -207,6 +209,7 @@ const vo_functions_t* const video_out_drivers[] =
 #ifdef CONFIG_GL
         &video_out_gl,
         &video_out_gl2,
+        &video_out_balls,
 #endif
 #ifdef CONFIG_DGA
         &video_out_dga,
