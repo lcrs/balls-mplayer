@@ -419,7 +419,7 @@ static void drawTextureDisplay (void)
 
   glColor4f(1.0,1.0,1.0,1.0);
 
-  // Update the shader params
+  // Update our shader params for this frame
   if(bypassall) {
       mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, 1.0, 1.0, 1.0, 1.0);
       mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, 0.0, 0.0, 0.0, 0.0);
@@ -600,20 +600,24 @@ static int config_glx(uint32_t width, uint32_t height, uint32_t d_width, uint32_
   vo_x11_create_vo_window(vinfo, vo_dx, vo_dy, d_width, d_height,
           flags, vo_x11_create_colormap(vinfo), "balls", title);
 
-  // Find X Input Extension opcode
-  int event, error;
-  XQueryExtension(mDisplay, "XInputExtension", &xi_opcode, &event, &error);
+  // Find X Input Extension's opcode for checking cookies later
+  {
+    int event, error;
+    XQueryExtension(mDisplay, "XInputExtension", &xi_opcode, &event, &error);
+  }
 
-  // Ask for Raw X Input Extension events
-  XIEventMask mask;
-  mask.mask_len = XIMaskLen(XI_RawMotion);
-  mask.mask = calloc(mask.mask_len, sizeof(char));
-  mask.deviceid = XIAllMasterDevices;
-  XISetMask(mask.mask, XI_RawButtonPress);
-  XISetMask(mask.mask, XI_RawButtonRelease);
-  XISetMask(mask.mask, XI_RawMotion);
-  XISelectEvents(mDisplay, DefaultRootWindow(mDisplay), &mask, 1);
-  free(mask.mask);
+  // Ask to be delivered raw events
+  {
+    XIEventMask mask;
+    mask.mask_len = XIMaskLen(XI_RawMotion);
+    mask.mask = calloc(mask.mask_len, sizeof(char));
+    mask.deviceid = XIAllMasterDevices;
+    XISetMask(mask.mask, XI_RawButtonPress);
+    XISetMask(mask.mask, XI_RawButtonRelease);
+    XISetMask(mask.mask, XI_RawMotion);
+    XISelectEvents(mDisplay, DefaultRootWindow(mDisplay), &mask, 1);
+    free(mask.mask);
+  }
 
   return 0;
 }
@@ -658,7 +662,7 @@ static int initGl(uint32_t d_width, uint32_t d_height)
     params.csp_params.input_shift = -depth & 7;
     glSetupYUVConversion(&params);
 
-    // Load ours it's better
+    // Load our fragment shader, overriding the one set up by glSetupYUVConversion()
     mpglProgramString(GL_FRAGMENT_PROGRAM, GL_PROGRAM_FORMAT_ASCII, strlen(ballsprog), ballsprog);
     slope.r = slope.g = slope.b = 1.0;
     offset.r = offset.g = offset.b = 0.0;
@@ -786,6 +790,9 @@ static void check_events(void)
     if( Event.type == KeyPress ) {
         XLookupString( &Event.xkey,buf,sizeof(buf),&keySym,&stat );
         key = (keySym&0xff00) != 0 ? (keySym&0x00ff) + 256 : keySym;
+        gl_handlekey(key);
+        
+        // F11 is our bypass key
         if(key == 456) {
             if(bypassall) {
                 bypassall = 0;
@@ -793,28 +800,28 @@ static void check_events(void)
                 bypassall = 1;
             }
         }
-        //if(gl_handlekey(key))
-        //XPutBackEvent(mDisplay, &Event);
-        //break;
 
         XPutBackEvent(mDisplay, &Event);
         e=glctx.check_events();
         if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
         if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
     } else if(Event.type == ConfigureNotify) {
+        // Make sure resizes are responded to - we don't call mplayers normal catch-all event checking
+        // because it keeps unhiding the cursor
         XPutBackEvent(mDisplay, &Event);
         e=glctx.check_events();
         if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
         if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
     } else if(XGetEventData(mDisplay, cookie) && (cookie->type == GenericEvent) && (cookie->extension == xi_opcode)) {
-      // Aw yeah
+      // This is the real stuff right here.  Raw events.
+      // We naively assume the balls are devices 13, 14 and 15
       float wheelinc = 0.005;
       XIRawEvent *xire = (XIRawEvent *)cookie->data;
       switch(cookie->evtype) {
         case XI_RawButtonPress:
-            //printf("ball %d button %d\n", xire->sourceid, xire->detail);
+            mp_msg(MSGT_VO, MSGL_V, "[balls] ball %d button %d\n", xire->sourceid, xire->detail);
             if((xire->detail == 1) || (xire->detail == 3)) {
-                // Reset - should split wheel/ball resets somehow
+                // Reset this ball - would be nice to split wheel/ball luma/chroma resets somehow
                 switch(xire->sourceid) {
                     case 13:
                         offset.r = 0.0;
@@ -835,7 +842,7 @@ static void check_events(void)
                 break;
             }
             if(xire->detail == 4) {
-                // Wheel down
+                // Wheel down, assume other buttons are wheel up
                 wheelinc *= -1;
             }
             switch(xire->sourceid) {
@@ -857,72 +864,72 @@ static void check_events(void)
             }
             break;
         case XI_RawMotion:
-            //printf("ball %d ", xire->sourceid);
-            while(0);
-            double *val = xire->valuators.values;
-            double vall;
-            float ballinc = 0.00005;
-            float r, g, b;
-            r = g = b = 0.0;
-            for(int axis = 0; axis < xire->valuators.mask_len * sizeof(double); axis++) {
-                if(XIMaskIsSet(xire->valuators.mask, axis)) {
-                    vall = *val++;
-                    //printf("axis %2d: %.2f\n", axis, vall);
-                    if(axis == 0) {
-                        r += ballinc * vall;
-                        g -= ballinc * vall;
-                        b += ballinc * vall;
-                    }
-                    if(axis == 1) {
-                        r += ballinc * vall;
-                        g -= ballinc * vall;
-                        b -= ballinc * vall;
-                    }
-                }
-            }
-            switch(xire->sourceid) {
-                case 13:
-                    offset.r += r;
-                    offset.g += g;
-                    offset.b += b;
-                    // compensate to get blackpoint rather than master offset
-                    slope.r /= 1.0 + r;
-                    slope.g /= 1.0 + g;
-                    slope.b /= 1.0 + b;
-                break;
-                case 14:
-                    power.r -= r;
-                    power.g -= g;
-                    power.b -= b;
-                break;
-                case 15:
-                    slope.r += r*3;
-                    slope.g += g*3;
-                    slope.b += b*3;
-                break;
+            mp_msg(MSGT_VO, MSGL_V, "[balls] ball %d ", xire->sourceid);
+            {
+              double *val = xire->valuators.values;
+              double vall;
+              float ballinc = 0.00005;
+              float r, g, b;
+              r = g = b = 0.0;
+              // Would not have figured this out without the xinput source
+              for(int axis = 0; axis < xire->valuators.mask_len * sizeof(double); axis++) {
+                  if(XIMaskIsSet(xire->valuators.mask, axis)) {
+                      vall = *val++;
+                      mp_msg(MSGT_VO, MSGL_V, "axis %2d: %.2f\n", axis, vall);
+                      if(axis == 0) {
+                          // Horizontal, to the right means more green
+                          r += ballinc * vall;
+                          g -= ballinc * vall;
+                          b += ballinc * vall;
+                      }
+                      if(axis == 1) {
+                          // Vertical, upwards means more red
+                          r += ballinc * vall;
+                          g -= ballinc * vall;
+                          b -= ballinc * vall;
+                      }
+                  }
+              }
+              switch(xire->sourceid) {
+                  case 13:
+                      offset.r += r;
+                      offset.g += g;
+                      offset.b += b;
+                      // Compensate to get lift control rather than master offset
+                      slope.r /= 1.0 + r;
+                      slope.g /= 1.0 + g;
+                      slope.b /= 1.0 + b;
+                  break;
+                  case 14:
+                      power.r -= r;
+                      power.g -= g;
+                      power.b -= b;
+                  break;
+                  case 15:
+                      slope.r += r*3;
+                      slope.g += g*3;
+                      slope.b += b*3;
+                  break;
+              }
             }
             break;
       }
-    } else {
-      //XPutBackEvent(mDisplay, &Event);
-      //break;
     }
     
+    // If we get an event while paused, redraw, but not more than 24 times a second
     if(int_pause) {
-    struct timeval tv;
-    struct timezone tz;
-    gettimeofday(&tv, &tz);
-    double now = tv.tv_usec + (tv.tv_sec * 1000000.0);
-    if(now - lastflip > (1000000.0 / 24.0)) {
-        flip_page();
-        lastflip = now;
-    }
+      struct timeval tv;
+      struct timezone tz;
+      double now;
+      gettimeofday(&tv, &tz);
+      now = tv.tv_usec + (tv.tv_sec * 1000000.0);
+      if(now - lastflip > (1000000.0 / 24.0)) {
+          flip_page();
+          lastflip = now;
+      }
     }
   }
 #endif
-  //e=glctx.check_events();
-  //if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
-  //if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
 }
 
 static void draw_osd(void)
