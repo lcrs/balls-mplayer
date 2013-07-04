@@ -22,7 +22,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <X11/extensions/XInput2.h>
+#include <sys/time.h>
 
 #include "config.h"
 #include "mp_msg.h"
@@ -108,7 +110,7 @@ char ballsprog[] =  "!!ARBfp1.0\n"
                     "MAD res.rgb, yuv.gggg, ucoef, res;\n"
                     "MAD res.rgb, yuv.bbbb, vcoef, res;\n"
                     "MUL res.rgb, res, program.env[0];\n"
-                    "ADD res.rgb, res, program.env[1];\n"
+                    "ADD_SAT res.rgb, res, program.env[1];\n"
                     "POW res.r, res.r, program.env[2].r;\n"
                     "POW res.g, res.g, program.env[2].g;\n"
                     "POW res.b, res.b, program.env[2].b;\n"
@@ -122,6 +124,8 @@ struct colour {
 } slope, offset, power;
 
 int xi_opcode;
+static double lastflip = 0.0;
+
 
 /* The squares that are tiled to make up the game screen polygon */
 
@@ -414,6 +418,11 @@ static void drawTextureDisplay (void)
 
   glColor4f(1.0,1.0,1.0,1.0);
 
+  // Update the shader params
+  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, slope.r, slope.g, slope.b, 1.0);
+  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, offset.r, offset.g, offset.b, 0.0);
+  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 2, power.r, power.g, power.b, 1.0);
+
   if (is_yuv)
     glEnableYUVConversion(GL_TEXTURE_2D, use_yuv);
   for (y = 0; y < texnumy; y++) {
@@ -587,7 +596,7 @@ static int config_glx(uint32_t width, uint32_t height, uint32_t d_width, uint32_
   // Find X Input Extension opcode
   int event, error;
   XQueryExtension(mDisplay, "XInputExtension", &xi_opcode, &event, &error);
-    
+
   // Ask for Raw X Input Extension events
   XIEventMask mask;
   mask.mask_len = XIMaskLen(XI_RawMotion);
@@ -762,27 +771,143 @@ static void check_events(void)
   int            key;
   static XComposeStatus stat;
 
+  // We need to check the cookie of the event later
+  XGenericEventCookie *cookie = (XGenericEventCookie *)&Event.xcookie;
+
   while ( XPending( mDisplay ) ) {
     XNextEvent( mDisplay,&Event );
     if( Event.type == KeyPress ) {
-      XLookupString( &Event.xkey,buf,sizeof(buf),&keySym,&stat );
-      key = (keySym&0xff00) != 0 ? (keySym&0x00ff) + 256 : keySym;
-      if(gl_handlekey(key))
+      //XLookupString( &Event.xkey,buf,sizeof(buf),&keySym,&stat );
+      //key = (keySym&0xff00) != 0 ? (keySym&0x00ff) + 256 : keySym;
+      //if(gl_handlekey(key))
+        //XPutBackEvent(mDisplay, &Event);
+      //break;
+
         XPutBackEvent(mDisplay, &Event);
-      break;
-    } else if(0) {
-      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, slope.r, slope.g, slope.b, 1.0);
-      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, offset.r, offset.g, offset.b, 0.0);
-      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 2, power.r, power.g, power.b, 1.0);
+        e=glctx.check_events();
+        if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
+        if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
+    } else if(Event.type == ConfigureNotify) {
+        XPutBackEvent(mDisplay, &Event);
+        e=glctx.check_events();
+        if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
+        if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
+    } else if(XGetEventData(mDisplay, cookie) && (cookie->type == GenericEvent) && (cookie->extension == xi_opcode)) {
+      // Aw yeah
+      float wheelinc = 0.005;
+      XIRawEvent *xire = (XIRawEvent *)cookie->data;
+      switch(cookie->evtype) {
+        case XI_RawButtonPress:
+            //printf("ball %d button %d\n", xire->sourceid, xire->detail);
+            if((xire->detail == 1) || (xire->detail == 3)) {
+                // Reset - should split wheel/ball resets somehow
+                switch(xire->sourceid) {
+                    case 13:
+                        offset.r = 0.0;
+                        offset.g = 0.0;
+                        offset.b = 0.0;
+                    break;
+                    case 14:
+                        power.r = 1.0;
+                        power.g = 1.0;
+                        power.b = 1.0;
+                    break;
+                    case 15:
+                        slope.r = 1.0;
+                        slope.g = 1.0;
+                        slope.b = 1.0;
+                    break;
+                }
+                break;
+            }
+            if(xire->detail == 4) {
+                // Wheel down
+                wheelinc *= -1;
+            }
+            switch(xire->sourceid) {
+                case 13:
+                    offset.r += wheelinc;
+                    offset.g += wheelinc;
+                    offset.b += wheelinc;
+                break;
+                case 14:
+                    power.r -= wheelinc*2.0;
+                    power.g -= wheelinc*2.0;
+                    power.b -= wheelinc*2.0;
+                break;
+                case 15:
+                    slope.r += wheelinc*1.5;
+                    slope.g += wheelinc*1.5;
+                    slope.b += wheelinc*1.5;
+                break;
+            }
+            break;
+        case XI_RawMotion:
+            //printf("ball %d ", xire->sourceid);
+            while(0);
+            double *val = xire->valuators.values;
+            double vall;
+            float ballinc = 0.00005;
+            float r, g, b;
+            r = g = b = 0.0;
+            for(int axis = 0; axis < xire->valuators.mask_len * sizeof(double); axis++) {
+                if(XIMaskIsSet(xire->valuators.mask, axis)) {
+                    vall = *val++;
+                    //printf("axis %2d: %.2f\n", axis, vall);
+                    if(axis == 0) {
+                        r += ballinc * vall;
+                        g -= ballinc * vall;
+                        b += ballinc * vall;
+                    }
+                    if(axis == 1) {
+                        r += ballinc * vall;
+                        g -= ballinc * vall;
+                        b -= ballinc * vall;
+                    }
+                }
+            }
+            switch(xire->sourceid) {
+                case 13:
+                    offset.r += r;
+                    offset.g += g;
+                    offset.b += b;
+                    // compensate to get blackpoint rather than master offset
+                    slope.r /= 1.0 + r;
+                    slope.g /= 1.0 + g;
+                    slope.b /= 1.0 + b;
+                break;
+                case 14:
+                    power.r -= r;
+                    power.g -= g;
+                    power.b -= b;
+                break;
+                case 15:
+                    slope.r += r*3;
+                    slope.g += g*3;
+                    slope.b += b*3;
+                break;
+            }
+            break;
+      }
+      if(int_pause) {
+        struct timeval tv;
+        struct timezone tz;
+        gettimeofday(&tv, &tz);
+        double now = tv.tv_usec + (tv.tv_sec * 1000000.0);
+        if(now - lastflip > (1000000.0 / 24.0)) {
+            flip_page();
+            lastflip = now;
+        }
+      }
     } else {
-      XPutBackEvent(mDisplay, &Event);
-      break;
+      //XPutBackEvent(mDisplay, &Event);
+      //break;
     }
   }
 #endif
-  e=glctx.check_events();
-  if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
-  if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
+  //e=glctx.check_events();
+  //if(e&VO_EVENT_RESIZE) resize(vo_dwidth, vo_dheight);
+  //if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
 }
 
 static void draw_osd(void)
