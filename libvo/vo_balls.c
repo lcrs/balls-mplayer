@@ -124,7 +124,8 @@ struct colour {
 } slope, offset, power;
 
 int xi_opcode;
-static double lastflip = 0.0;
+double lastflip = 0.0;
+int bypassall = 0;
 
 
 /* The squares that are tiled to make up the game screen polygon */
@@ -419,9 +420,15 @@ static void drawTextureDisplay (void)
   glColor4f(1.0,1.0,1.0,1.0);
 
   // Update the shader params
-  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, slope.r, slope.g, slope.b, 1.0);
-  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, offset.r, offset.g, offset.b, 0.0);
-  mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 2, power.r, power.g, power.b, 1.0);
+  if(bypassall) {
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, 1.0, 1.0, 1.0, 1.0);
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, 0.0, 0.0, 0.0, 0.0);
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 2, 1.0, 1.0, 1.0, 1.0);
+  } else {
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 0, slope.r, slope.g, slope.b, 1.0);
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 1, offset.r, offset.g, offset.b, 0.0);
+      mpglProgramEnvParameter4f(GL_FRAGMENT_PROGRAM, 2, power.r, power.g, power.b, 1.0);
+  }
 
   if (is_yuv)
     glEnableYUVConversion(GL_TEXTURE_2D, use_yuv);
@@ -777,11 +784,18 @@ static void check_events(void)
   while ( XPending( mDisplay ) ) {
     XNextEvent( mDisplay,&Event );
     if( Event.type == KeyPress ) {
-      //XLookupString( &Event.xkey,buf,sizeof(buf),&keySym,&stat );
-      //key = (keySym&0xff00) != 0 ? (keySym&0x00ff) + 256 : keySym;
-      //if(gl_handlekey(key))
+        XLookupString( &Event.xkey,buf,sizeof(buf),&keySym,&stat );
+        key = (keySym&0xff00) != 0 ? (keySym&0x00ff) + 256 : keySym;
+        if(key == 456) {
+            if(bypassall) {
+                bypassall = 0;
+            } else {
+                bypassall = 1;
+            }
+        }
+        //if(gl_handlekey(key))
         //XPutBackEvent(mDisplay, &Event);
-      //break;
+        //break;
 
         XPutBackEvent(mDisplay, &Event);
         e=glctx.check_events();
@@ -889,19 +903,20 @@ static void check_events(void)
             }
             break;
       }
-      if(int_pause) {
-        struct timeval tv;
-        struct timezone tz;
-        gettimeofday(&tv, &tz);
-        double now = tv.tv_usec + (tv.tv_sec * 1000000.0);
-        if(now - lastflip > (1000000.0 / 24.0)) {
-            flip_page();
-            lastflip = now;
-        }
-      }
     } else {
       //XPutBackEvent(mDisplay, &Event);
       //break;
+    }
+    
+    if(int_pause) {
+    struct timeval tv;
+    struct timezone tz;
+    gettimeofday(&tv, &tz);
+    double now = tv.tv_usec + (tv.tv_sec * 1000000.0);
+    if(now - lastflip > (1000000.0 / 24.0)) {
+        flip_page();
+        lastflip = now;
+    }
     }
   }
 #endif
