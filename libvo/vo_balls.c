@@ -877,10 +877,10 @@ static void check_events(void)
                       vall = *val++;
                       mp_msg(MSGT_VO, MSGL_V, "axis %2d: %.2f\n", axis, vall);
                       if(axis == 0) {
-                          // Horizontal, to the right means more green
-                          r += ballinc * vall;
-                          g -= ballinc * vall;
-                          b += ballinc * vall;
+                          // Horizontal, to the left means more green
+                          r -= ballinc * vall;
+                          g += ballinc * vall;
+                          b -= ballinc * vall;
                       }
                       if(axis == 1) {
                           // Vertical, upwards means more red
