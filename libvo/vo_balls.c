@@ -814,7 +814,7 @@ static void check_events(void)
         if(e&VO_EVENT_EXPOSE && int_pause) flip_page();
     } else if(XGetEventData(mDisplay, cookie) && (cookie->type == GenericEvent) && (cookie->extension == xi_opcode)) {
       // This is the real stuff right here.  Raw events.
-      // We naively assume the balls are devices 13, 14 and 15
+      // We naively assume the balls are devices 21, 22 and 23
       float wheelinc = 0.005;
       XIRawEvent *xire = (XIRawEvent *)cookie->data;
       switch(cookie->evtype) {
@@ -823,17 +823,17 @@ static void check_events(void)
             if((xire->detail == 1) || (xire->detail == 3)) {
                 // Reset this ball - would be nice to split wheel/ball luma/chroma resets somehow
                 switch(xire->sourceid) {
-                    case 13:
+                    case 21:
                         offset.r = 0.0;
                         offset.g = 0.0;
                         offset.b = 0.0;
                     break;
-                    case 14:
+                    case 22:
                         power.r = 1.0;
                         power.g = 1.0;
                         power.b = 1.0;
                     break;
-                    case 15:
+                    case 23:
                         slope.r = 1.0;
                         slope.g = 1.0;
                         slope.b = 1.0;
@@ -846,17 +846,17 @@ static void check_events(void)
                 wheelinc *= -1;
             }
             switch(xire->sourceid) {
-                case 13:
+                case 21:
                     offset.r += wheelinc;
                     offset.g += wheelinc;
                     offset.b += wheelinc;
                 break;
-                case 14:
+                case 22:
                     power.r -= wheelinc*2.0;
                     power.g -= wheelinc*2.0;
                     power.b -= wheelinc*2.0;
                 break;
-                case 15:
+                case 23:
                     slope.r += wheelinc*1.5;
                     slope.g += wheelinc*1.5;
                     slope.b += wheelinc*1.5;
@@ -891,7 +891,7 @@ static void check_events(void)
                   }
               }
               switch(xire->sourceid) {
-                  case 13:
+                  case 21:
                       offset.r += r;
                       offset.g += g;
                       offset.b += b;
@@ -900,12 +900,12 @@ static void check_events(void)
                       slope.g /= 1.0 + g;
                       slope.b /= 1.0 + b;
                   break;
-                  case 14:
+                  case 22:
                       power.r -= r;
                       power.g -= g;
                       power.b -= b;
                   break;
-                  case 15:
+                  case 23:
                       slope.r += r*3;
                       slope.g += g*3;
                       slope.b += b*3;
