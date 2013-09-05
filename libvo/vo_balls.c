@@ -896,9 +896,9 @@ static void check_events(void)
                       offset.g += g;
                       offset.b += b;
                       // Compensate to get lift control rather than master offset
-                      slope.r /= 1.0 + r;
-                      slope.g /= 1.0 + g;
-                      slope.b /= 1.0 + b;
+                      slope.r *= 1.0 - r;
+                      slope.g *= 1.0 - g;
+                      slope.b *= 1.0 - b;
                   break;
                   case 19:
                       power.r -= r;
